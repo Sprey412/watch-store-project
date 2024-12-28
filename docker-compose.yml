@@ -36,6 +36,25 @@ services:
       retries: 5
       start_period: 20s
 
+      # PostgreSQL база данных
+  db:
+    image: postgres:15                     # образ PostgreSQL
+    container_name: postgres_db            # имя контейнера
+    environment:                           # переменные окружения
+      POSTGRES_USER: watchuser             # имя пользователя
+      POSTGRES_PASSWORD: watchpass         # пароль пользователя
+      POSTGRES_DB: watchstore              # имя базы данных
+    ports:
+      - '5432:5432'                        # порт для подключения
+    volumes:
+      - postgres_data:/var/lib/postgresql/data  # сохранение данных
+    healthcheck:                           # healthcheck для PostgreSQL
+      test: ["CMD", "pg_isready", "-U", "watchuser", "-d", "watchstore"] # проверка доступности БД
+      interval: 10s                        # проверять каждые 10 секунд
+      timeout: 5s                          # ждать 5 секунд ответа
+      retries: 5                           # сделать 5 попыток, прежде чем признать контейнер unhealthy
+      start_period: 20s                    # дать PostgreSQL 20 секунд форы на полную инициализацию
+
   # Каталог (Producer)
   catalog-service:
     build: ./catalog-service              # путь к Dockerfile
@@ -46,9 +65,12 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      db:  # Зависимость от PostgreSQL
+        condition: service_healthy        # Ждем, пока PostgreSQL станет "healthy"
 
     environment:
       KAFKA_BOOTSTRAP_SERVERS: 'kafka:9092'
+      DATABASE_URL: 'postgresql://watchuser:watchpass@db:5432/watchstore'  # строка подключения к БД
     ports:
       - '5000:5000'                       # проброс порта для Flask (или любого другого веб-сервиса)
 
@@ -59,10 +81,16 @@ services:
     
     # Аналогично
     depends_on:
-      kafka:
-        condition: service_healthy
+      kafka:                              # Зависимость от Kafka
+        condition: service_healthy        # Ждем, пока Kafka станет "healthy"
+      db:                                 # Добавляем зависимость от PostgreSQL
+        condition: service_healthy        # Ждем, пока PostgreSQL станет "healthy"
 
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: 'kafka:9092'
+      KAFKA_BOOTSTRAP_SERVERS: 'kafka:9092' # адрес брокера Kafka
+      DATABASE_URL: 'postgresql://watchuser:watchpass@db:5432/watchstore'  # строка подключения к БД
     # ports:
     #   - '5001:5000'
+
+volumes:
+  postgres_data:

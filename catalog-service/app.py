@@ -1,43 +1,61 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from kafka import KafkaProducer
-import json 
+from sqlalchemy import create_engine, Column, Integer, String, Float
+from sqlalchemy.orm import declarative_base, sessionmaker
+import json
 import os
 
 app = Flask(__name__) # Создание Flask-приложение
 
-# Чтение адреса Kafka из переменных окружения, которые указаны в docker-compose
-bootstrap_servers = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
-
-# Создание продьюсера
-producer = KafkaProducer(
-    bootstrap_servers=bootstrap_servers, # Адрес Kafka
-    value_serializer=lambda v: json.dumps(v).encode('utf-8')  # Для отправки JSON
+# Конфигурация Kafka Producer
+producer = KafkaProducer( # Создание продьюсера
+    bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092'), # Адрес Kafka
+    value_serializer=lambda v: json.dumps(v).encode('utf-8') # Для отправки JSON
 )
 
-@app.route('/new-watch', methods=['POST']) # Декоратор для обработки POST-запросов на /new-watch
-def new_watch(): # Функция для обработки запроса
-    """
-    Эндпоинт, который будет добавлять новые часы в каталог и отправлять сообщение в Kafka. 
-    Пример тела запроса (JSON):
-    {
-      "watchName": "Casio Edifice",
-      "price": 29990
+# Конфигурация базы данных
+DATABASE_URL = os.getenv('DATABASE_URL')  # 'postgresql://watchuser:watchpass@db:5432/watchstore'
+engine = create_engine(DATABASE_URL) # Создание подключения к базе данных
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) # Создание сессии
+Base = declarative_base() # Создание базового класса
+
+# Модель для часов
+class Watch(Base): # Создание модели
+    __tablename__ = 'watches' # Название таблицы
+
+    id = Column(Integer, primary_key=True, index=True) # Поле id
+    name = Column(String, nullable=False) # Поле name
+    price = Column(Float, nullable=False) # Поле price
+
+# Создание таблиц
+Base.metadata.create_all(bind=engine)
+
+@app.route('/new-watch', methods=['POST']) # Обработчик POST-запроса
+def add_watch(): # Функция добавления часов
+    data = request.get_json() # Получение данных из запроса
+    watch_name = data.get('watchName') # Получение названия часов
+    price = data.get('price') # Получение цены
+
+    if not watch_name or not price: # Если не переданы watchName или price
+        return jsonify({"error": "watchName and price are required"}), 400 # Вернуть ошибку
+
+    # Сохранение в базе данных
+    session = SessionLocal() # Создание сессии
+    new_watch = Watch(name=watch_name, price=price) # Создание новой записи
+    session.add(new_watch) # Добавление записи
+    session.commit() # Сохранение изменений
+    session.refresh(new_watch) # Обновление записи
+    session.close() # Закрытие сессии
+
+    # Отправка сообщения в Kafka
+    message = { # Создание сообщения
+        "id": new_watch.id, # id новой записи
+        "watchName": watch_name, # Название часов
+        "price": price # Цена
     }
-    """
-    watch_data = request.json # Получаем JSON-тело запроса
-    if not watch_data: # Если тело запроса пустое
-        return {"error": "No JSON body provided"}, 400 # Возвращаем ошибку 400
+    producer.send('new-watches', value=message) # Отправка сообщения
 
-    # Отправляем в Kafka топик "new-watches"
-    producer.send('new-watches', watch_data) 
-    producer.flush()  # принудительная отправка
-
-    return {"message": f"New watch '{watch_data.get('watchName')}' was added"}, 200 # Возвращаем успешный ответ
-
-@app.route('/') # Декоратор для обработки GET-запросов на /
-def index(): # Функция для обработки запроса
-    return "Catalog service is running! Use POST /new-watch to add a new watch." # Возвращаем простой текст
+    return jsonify({"message": f"New watch '{watch_name}' was added"}), 201 # Вернуть сообщение об успешном добавлении
 
 if __name__ == '__main__': # Если файл запускается как основной
-    # Запуск Flask на 0.0.0.0, порт 5000
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000) # Запуск приложения
