@@ -1,0 +1,68 @@
+services:
+  # Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest # образ Zookeeper
+    container_name: zookeeper              # имя контейнера
+    environment:                           # переменные окружения
+      ZOOKEEPER_CLIENT_PORT: 2181          # порт для подключения клиентов
+      ZOOKEEPER_TICK_TIME: 2000            # время в миллисекундах между тиками
+    ports:                                 # проброс портов
+      - '2181:2181'                        # порт для подключения клиентов
+
+  # Kafka брокер
+  kafka:
+    image: confluentinc/cp-kafka:latest   # образ Kafka
+    container_name: kafka                 # имя контейнера
+    depends_on:
+      - zookeeper                         # сначала должен быть запущен Zookeeper
+    ports:
+      - '9092:9092'                       # порт для подключения клиентов
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+    # Добавляем healthcheck, чтобы Docker Compose понимал, что брокер "здоров"
+    #  - test: команда, которая должна вернуть 0, если брокер Kafka реально слушает порт
+    #  - interval: проверять каждые 10 секунд
+    #  - timeout: ждать 5 секунд ответа
+    #  - retries: сделать 5 попыток, прежде чем признать контейнер unhealthy
+    #  - start_period: дать Kafka 20 секунд форы на полную инициализацию
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Каталог (Producer)
+  catalog-service:
+    build: ./catalog-service              # путь к Dockerfile
+    container_name: catalog-service       # имя контейнера
+    
+    # Говорим, что каталог-сервис зависит от Kafka
+    # но не только от запуска контейнера, а ждем, пока Kafka станет "healthy"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: 'kafka:9092'
+    ports:
+      - '5000:5000'                       # проброс порта для Flask (или любого другого веб-сервиса)
+
+  # Заказы (Consumer)
+  orders-service:
+    build: ./orders-service               # путь к Dockerfile
+    container_name: orders-service        # имя контейнера
+    
+    # Аналогично
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: 'kafka:9092'
+    # ports:
+    #   - '5001:5000'
