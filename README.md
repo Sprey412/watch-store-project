@@ -19,11 +19,6 @@ Watch Store Project — это микросервисное приложение
 - [Pytest](https://docs.pytest.org/)
 - [Postman](https://www.postman.com/)
 
-### Предварительные требования
-
-- [Docker](https://www.docker.com/get-started) установлен на вашем компьютере.
-- [Docker Compose](https://docs.docker.com/compose/install/) установлен.
-
 ### Установка
 
 1. **Клонируйте репозиторий**:
@@ -81,6 +76,6 @@ Watch Store Project — это микросервисное приложение
 
 ```json
 {
-  "watchName": "Rolex Submariner",
-  "price": 10000
+  "watchName": "CASIO G-Shock GA-2000",
+  "price": 18990
 }
